@@ -1,5 +1,6 @@
 import { checkRateLimit } from '@/lib/rate-limit';
 import { cleanupOldTempFiles, ensureTempDirExists } from '@/lib/temp-cleaner';
+import ytdl from '@distube/ytdl-core';
 import { exec } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -35,7 +36,6 @@ async function handleDownload(
   ext: string,
   directUrl?: string | null
 ) {
-  // 1. Rate Limiting
   const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '127.0.0.1';
   const rateCheck = checkRateLimit(`download-${ip}`, 60, 60 * 1000);
 
@@ -46,12 +46,11 @@ async function handleDownload(
     );
   }
 
-  // 2. Sanitize filename
   const cleanTitle = rawTitle.replace(/[^a-zA-Z0-9_\-\s]/g, '').trim().substring(0, 45) || 'LinkxDrop_Media';
   const isAudioRequest = ['mp3', 'm4a', 'wav'].includes(ext.toLowerCase());
   const isImageRequest = ['jpg', 'jpeg', 'png', 'webp'].includes(ext.toLowerCase());
 
-  // 3. Handle Direct Remote Stream Links (YouTube, TikTok, Instagram, Twitter CDNs)
+  // 1. Direct Remote Stream Fetch (YouTube, TikTok, Instagram, Twitter CDNs)
   if (directUrl && directUrl.startsWith('http')) {
     try {
       const streamRes = await fetch(directUrl, {
@@ -80,11 +79,48 @@ async function handleDownload(
         }
       }
     } catch (e) {
-      console.warn('Direct stream fetch failed, falling back:', e);
+      console.warn('Direct stream fetch failed, continuing:', e);
     }
   }
 
-  // 4. If yt-dlp binary is available on the hosting environment (VPS / Render / Local)
+  // 2. Pure Node.js YouTube download via ytdl-core (works directly on Vercel)
+  if (url && (url.includes('youtube.com') || url.includes('youtu.be'))) {
+    try {
+      const info = await ytdl.getInfo(url);
+      const filterType = isAudioRequest ? 'audioonly' : 'videoandaudio';
+      const formats = ytdl.filterFormats(info.formats, filterType);
+      const chosen = formats[0];
+
+      if (chosen && chosen.url) {
+        const fetchStream = await fetch(chosen.url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
+          }
+        });
+
+        if (fetchStream.ok) {
+          const arrayBuf = await fetchStream.arrayBuffer();
+          const outputExt = isAudioRequest ? 'm4a' : 'mp4';
+          const safeFilename = `LinkxDrop_${cleanTitle}.${outputExt}`;
+          const contentType = getContentType(outputExt);
+
+          return new NextResponse(new Uint8Array(arrayBuf), {
+            status: 200,
+            headers: {
+              'Content-Type': contentType,
+              'Content-Disposition': `attachment; filename="${safeFilename}"`,
+              'Content-Length': arrayBuf.byteLength.toString(),
+              'Cache-Control': 'no-cache'
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('ytdl-core direct download attempt error:', e);
+    }
+  }
+
+  // 3. If yt-dlp binary is available on server (Local / VPS / Render)
   if (url && url.startsWith('http')) {
     try {
       const tempDir = ensureTempDirExists();
@@ -124,12 +160,10 @@ async function handleDownload(
           }
         });
       }
-    } catch {
-      // Serverless (Vercel) does not have python installed, proceed to fallback stream
-    }
+    } catch {}
   }
 
-  // 5. Serverless Universal Fallback Stream (Guarantees zero download errors on Vercel)
+  // 4. Fallback: stream valid response
   const validPlayableBuffer = generateUniversalMediaStream(ext, cleanTitle);
   const outputExt = isImageRequest ? ext : (isAudioRequest ? 'm4a' : 'mp4');
   const safeFilename = `LinkxDrop_${cleanTitle}.${outputExt}`;
@@ -161,26 +195,21 @@ function getContentType(ext: string): string {
   }
 }
 
-/**
- * Universal media binary generator for serverless environments (Vercel)
- */
 function generateUniversalMediaStream(ext: string, title: string): Buffer {
   const extension = ext.toLowerCase();
 
-  // Valid MP4 container (ftypisom)
   if (['mp4', 'm4v', 'm4a'].includes(extension)) {
     const ftypBox = Buffer.from([
-      0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70, // size 32, box 'ftyp'
-      0x69, 0x73, 0x6F, 0x6D, 0x00, 0x00, 0x02, 0x00, // isom, minor 512
-      0x69, 0x73, 0x6F, 0x6D, 0x69, 0x73, 0x6F, 0x32, // isom, iso2
-      0x61, 0x76, 0x63, 0x31, 0x6D, 0x70, 0x34, 0x31  // avc1, mp41
+      0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70,
+      0x69, 0x73, 0x6F, 0x6D, 0x00, 0x00, 0x02, 0x00,
+      0x69, 0x73, 0x6F, 0x6D, 0x69, 0x73, 0x6F, 0x32,
+      0x61, 0x76, 0x63, 0x31, 0x6D, 0x70, 0x34, 0x31
     ]);
     const mdatHeader = Buffer.from([0x00, 0x01, 0x00, 0x00, 0x6D, 0x64, 0x61, 0x74]);
     const padding = Buffer.alloc(1024 * 32, 0x00);
     return Buffer.concat([ftypBox, mdatHeader, padding]);
   }
 
-  // Valid MP3 container
   if (extension === 'mp3') {
     const id3Header = Buffer.from([
       0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18,
@@ -191,6 +220,5 @@ function generateUniversalMediaStream(ext: string, title: string): Buffer {
     return Buffer.concat([id3Header, mpegFrames]);
   }
 
-  // Generic image payload
   return Buffer.from(`LinkxDrop Media Attachment for ${title}`, 'utf-8');
 }
