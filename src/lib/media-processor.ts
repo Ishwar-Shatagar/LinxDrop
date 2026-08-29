@@ -17,17 +17,15 @@ export async function extractMediaMetadata(targetUrl: string): Promise<MediaMeta
 
   const { platform, cleanUrl, mediaId } = detection;
 
-  // 1. If YouTube, try ytdl-core (runs natively in Node.js on Vercel)
+  // 1. YouTube extractor
   if (platform === 'youtube') {
     try {
       const ytdlData = await extractYouTubeWithYtdlCore(cleanUrl);
       if (ytdlData) return ytdlData;
-    } catch (e) {
-      console.warn('ytdl-core failed, falling back:', e);
-    }
+    } catch {}
   }
 
-  // 2. Try Python yt-dlp if available on host
+  // 2. Try Python yt-dlp if available on host (Render / VPS / Localhost)
   try {
     const ytDlpData = await extractWithYtDlp(cleanUrl);
     if (ytDlpData) {
@@ -56,7 +54,7 @@ export async function extractMediaMetadata(targetUrl: string): Promise<MediaMeta
 }
 
 /**
- * Pure Node.js YouTube extractor (works 100% on Vercel serverless)
+ * Pure Node.js YouTube extractor
  */
 async function extractYouTubeWithYtdlCore(url: string): Promise<MediaMetadata | null> {
   try {
@@ -72,15 +70,12 @@ async function extractYouTubeWithYtdlCore(url: string): Promise<MediaMetadata | 
 
     const formats: MediaFormat[] = [];
 
-    // Find real video formats
     const videoWithAudio = ytdl.filterFormats(info.formats, 'videoandaudio');
     const bestMp4 = videoWithAudio.find(f => f.container === 'mp4') || videoWithAudio[0];
 
-    // Find real audio formats
     const audioOnly = ytdl.filterFormats(info.formats, 'audioonly');
     const bestAudio = audioOnly.find(f => f.container === 'mp4') || audioOnly[0];
 
-    // 1. Video formats
     formats.push({
       id: 'yt-1080p',
       category: 'video',
@@ -117,7 +112,6 @@ async function extractYouTubeWithYtdlCore(url: string): Promise<MediaMetadata | 
       isAvailable: true
     });
 
-    // 2. Audio formats
     formats.push({
       id: 'yt-mp3',
       category: 'audio',
@@ -143,7 +137,6 @@ async function extractYouTubeWithYtdlCore(url: string): Promise<MediaMetadata | 
       isAvailable: true
     });
 
-    // 3. Image formats
     formats.push({
       id: 'yt-jpg',
       category: 'image',
@@ -167,8 +160,7 @@ async function extractYouTubeWithYtdlCore(url: string): Promise<MediaMetadata | 
       thumbnail,
       formats
     };
-  } catch (err) {
-    console.error('ytdl.getInfo error:', err);
+  } catch {
     return null;
   }
 }
@@ -311,9 +303,10 @@ async function extractYouTubeMetadata(url: string, videoId?: string): Promise<Me
 }
 
 async function extractTikTokMetadata(url: string, mediaId?: string): Promise<MediaMetadata> {
-  const thumbnail = 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800&auto=format&fit=crop&q=80';
+  const defaultThumb = 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800&auto=format&fit=crop&q=80';
   let title = 'TikTok Video';
   let author = '@tiktok.user';
+  let thumbnail = defaultThumb;
   let directVideoUrl: string | undefined;
   let directAudioUrl: string | undefined;
 
@@ -324,6 +317,7 @@ async function extractTikTokMetadata(url: string, mediaId?: string): Promise<Med
       if (data.code === 0 && data.data) {
         title = data.data.title || title;
         author = data.data.author?.nickname ? `@${data.data.author.nickname}` : author;
+        thumbnail = data.data.cover || defaultThumb;
         directVideoUrl = data.data.play || data.data.hdplay;
         directAudioUrl = data.data.music;
       }
@@ -339,23 +333,72 @@ async function extractTikTokMetadata(url: string, mediaId?: string): Promise<Med
 }
 
 async function extractInstagramMetadata(url: string, code?: string): Promise<MediaMetadata> {
-  const thumbnail = 'https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?w=800&auto=format&fit=crop&q=80';
+  let thumbnail = 'https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?w=800&auto=format&fit=crop&q=80';
+  let title = 'Instagram Media';
+  let author = '@instagram.user';
+  let directVideoUrl: string | undefined;
+
+  try {
+    // Try Instagram public embed metadata
+    const embedRes = await fetch(`https://api.instagram.com/oembed/?url=${encodeURIComponent(url)}`);
+    if (embedRes.ok) {
+      const embedData = await embedRes.json();
+      title = embedData.title || title;
+      author = embedData.author_name ? `@${embedData.author_name}` : author;
+      thumbnail = embedData.thumbnail_url || thumbnail;
+    }
+  } catch {}
+
+  try {
+    // Try public Instagram media fetcher
+    const igRes = await fetch(`https://www.instagram.com/p/${code || ''}/?__a=1&__d=dis`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1'
+      }
+    });
+    if (igRes.ok) {
+      const igData = await igRes.json();
+      const item = igData?.items?.[0] || igData?.graphql?.shortcode_media;
+      if (item) {
+        directVideoUrl = item.video_versions?.[0]?.url || item.video_url;
+        thumbnail = item.image_versions2?.candidates?.[0]?.url || item.display_url || thumbnail;
+      }
+    }
+  } catch {}
+
   const formats: MediaFormat[] = [
-    { id: 'ig-1080p', category: 'video', label: 'MP4 1080p HD', extension: 'mp4', quality: '1080p', sizeEstimate: '~18 MB', mimeType: 'video/mp4', isAvailable: true },
-    { id: 'ig-mp3', category: 'audio', label: 'MP3 Audio Stream', extension: 'mp3', quality: 'MP3', sizeEstimate: '~2 MB', mimeType: 'audio/mpeg', isAvailable: true },
+    { id: 'ig-1080p', category: 'video', label: 'MP4 1080p HD', extension: 'mp4', quality: '1080p', sizeEstimate: '~18 MB', directUrl: directVideoUrl, mimeType: 'video/mp4', isAvailable: true },
+    { id: 'ig-mp3', category: 'audio', label: 'MP3 Audio Stream', extension: 'mp3', quality: 'MP3', sizeEstimate: '~2 MB', directUrl: directVideoUrl, mimeType: 'audio/mpeg', isAvailable: true },
     { id: 'ig-cover', category: 'image', label: 'Post Cover (JPG)', extension: 'jpg', quality: 'JPG', sizeEstimate: '~480 KB', directUrl: thumbnail, mimeType: 'image/jpeg', isAvailable: true }
   ];
-  return { id: `ig-${code || Date.now()}`, url, platform: 'instagram', title: 'Instagram Media', author: '@instagram.user', duration: '00:30', thumbnail, formats };
+  return { id: `ig-${code || Date.now()}`, url, platform: 'instagram', title, author, duration: '00:30', thumbnail, formats };
 }
 
 async function extractTwitterMetadata(url: string, tweetId?: string): Promise<MediaMetadata> {
   const thumbnail = 'https://images.unsplash.com/photo-1611605698335-8b1569810432?w=800&auto=format&fit=crop&q=80';
+  let title = 'X / Twitter Post Media';
+  let author = '@x_user';
+  let directVideoUrl: string | undefined;
+
+  try {
+    const res = await fetch(`https://api.vxtwitter.com/Twitter/status/${tweetId || ''}`);
+    if (res.ok) {
+      const data = await res.json();
+      title = data.text?.substring(0, 50) || title;
+      author = data.user_screen_name ? `@${data.user_screen_name}` : author;
+      const media = data.media_extended?.[0] || data.mediaURLs?.[0];
+      if (media?.url) {
+        directVideoUrl = media.url;
+      }
+    }
+  } catch {}
+
   const formats: MediaFormat[] = [
-    { id: 'tw-1080p', category: 'video', label: 'MP4 1080p HD Video', extension: 'mp4', quality: '1080p', sizeEstimate: '~16 MB', mimeType: 'video/mp4', isAvailable: true },
-    { id: 'tw-mp3', category: 'audio', label: 'MP3 Audio Stream', extension: 'mp3', quality: 'MP3', sizeEstimate: '~2 MB', mimeType: 'audio/mpeg', isAvailable: true },
+    { id: 'tw-1080p', category: 'video', label: 'MP4 1080p HD Video', extension: 'mp4', quality: '1080p', sizeEstimate: '~16 MB', directUrl: directVideoUrl, mimeType: 'video/mp4', isAvailable: true },
+    { id: 'tw-mp3', category: 'audio', label: 'MP3 Audio Stream', extension: 'mp3', quality: 'MP3', sizeEstimate: '~2 MB', directUrl: directVideoUrl, mimeType: 'audio/mpeg', isAvailable: true },
     { id: 'tw-image', category: 'image', label: 'Thumbnail (PNG)', extension: 'png', quality: 'PNG', sizeEstimate: '~520 KB', directUrl: thumbnail, mimeType: 'image/png', isAvailable: true }
   ];
-  return { id: `tw-${tweetId || Date.now()}`, url, platform: 'twitter', title: 'X / Twitter Post Media', author: '@x_user', duration: '00:28', thumbnail, formats };
+  return { id: `tw-${tweetId || Date.now()}`, url, platform: 'twitter', title, author, duration: '00:28', thumbnail, formats };
 }
 
 async function extractFacebookMetadata(url: string): Promise<MediaMetadata> {
