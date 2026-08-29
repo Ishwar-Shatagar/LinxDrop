@@ -78,7 +78,7 @@ async function extractYouTubeWithYtdlCore(url: string): Promise<MediaMetadata | 
 
     // Find real audio formats
     const audioOnly = ytdl.filterFormats(info.formats, 'audioonly');
-    const bestAudio = audioOnly.find(f => f.container === 'm4a') || audioOnly[0];
+    const bestAudio = audioOnly.find(f => f.container === 'mp4') || audioOnly[0];
 
     // 1. Video formats
     formats.push({
