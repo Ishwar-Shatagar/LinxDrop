@@ -3,13 +3,16 @@
 > **"Drop a link. Get your media."**  
 > A fast, modern, and privacy-first web application for downloading publicly accessible media from YouTube, TikTok, Instagram, Twitter/X, Facebook, and direct media URLs without signups or ads.
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Ishwar-Shatagar/LinxDrop)
+
 ---
 
 ## 👨‍💻 Author & Creator
 
 - **Developer**: **Ishwar Shtagar**
 - **Project**: LinkxDrop
-- **License**: MIT License (Open for personal and authorized public media use)
+- **Repository**: [https://github.com/Ishwar-Shatagar/LinxDrop](https://github.com/Ishwar-Shatagar/LinxDrop)
+- **License**: MIT License
 
 ---
 
@@ -33,7 +36,7 @@
 | **Micro-Animations** | **Framer Motion** | Fluid page transitions, loading states, & toast alerts |
 | **Iconography** | **Lucide React** | Clean, lightweight modern icons |
 | **Backend Engine** | **Next.js API Routes (`/api/*`)** | Dynamic metadata extraction, streaming, & cleanup |
-| **Media Extraction** | **yt-dlp & Native Stream Fetchers** | Extracts genuine audio, video, & image streams |
+| **Media Processing** | **yt-dlp, FFmpeg, Node.js** | Extracts and converts 100% playable video and audio streams |
 
 ---
 
@@ -64,6 +67,14 @@
 
 ---
 
+## 🌐 1-Click Cloud Deployment (Render - Free)
+
+Click the button below to deploy with full **Python + FFmpeg + yt-dlp** support:
+
+👉 **[Deploy LinkxDrop on Render](https://render.com/deploy?repo=https://github.com/Ishwar-Shatagar/LinxDrop)**
+
+---
+
 ## 🚀 How to Run Locally
 
 ### 1. Prerequisites
@@ -73,8 +84,8 @@
 ### 2. Installation
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/LinkxDrop.git
-cd LinkxDrop
+git clone https://github.com/Ishwar-Shatagar/LinxDrop.git
+cd LinxDrop
 
 # Install dependencies
 npm install
@@ -87,20 +98,6 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## 🌐 Deployment Guide
-
-### Deploy to Vercel (1-Click Free Hosting)
-1. Push this folder to your GitHub repository:
-   ```bash
-   git add .
-   git commit -m "Deploy LinkxDrop"
-   git push origin main
-   ```
-2. Log into [vercel.com](https://vercel.com) with GitHub.
-3. Click **Add New Project** → Select **LinkxDrop** → Click **Deploy**.
-
----
-
 ## 🛡️ Privacy & Compliance
 - **Zero Account Requirement**: No signups, no login, no tracking cookies.
 - **Public Content Only**: Does not bypass DRM, paywalls, or private account restrictions.
@@ -108,4 +105,4 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-Designed & Developed by **Ishwar Shtagar** 
+Designed & Developed by **Ishwar Shtagar** ❤️
