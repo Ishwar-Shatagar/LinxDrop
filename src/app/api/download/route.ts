@@ -50,7 +50,7 @@ async function handleDownload(
   const isAudioRequest = ['mp3', 'm4a', 'wav'].includes(ext.toLowerCase());
   const isImageRequest = ['jpg', 'jpeg', 'png', 'webp'].includes(ext.toLowerCase());
 
-  // 1. Direct Remote Stream Fetch (e.g. TikWM direct video/audio, Instagram CDN, Twitter MP4)
+  // 1. Direct Remote Stream Fetch (TikWM direct video/audio, Instagram CDN, Twitter MP4, Image CDNs)
   if (directUrl && directUrl.startsWith('http')) {
     try {
       const streamRes = await fetch(directUrl, {
@@ -62,7 +62,7 @@ async function handleDownload(
 
       if (streamRes.ok) {
         const mediaBuffer = await streamRes.arrayBuffer();
-        if (mediaBuffer.byteLength > 1024) {
+        if (mediaBuffer.byteLength > 500) {
           const outputExt = isImageRequest ? ext : (isAudioRequest ? 'm4a' : 'mp4');
           const safeFilename = `LinkxDrop_${cleanTitle}.${outputExt}`;
           const contentType = getContentType(outputExt);
@@ -79,7 +79,7 @@ async function handleDownload(
         }
       }
     } catch (e) {
-      console.warn('Direct stream fetch failed, continuing:', e);
+      console.warn('Direct stream fetch failed, trying local engine:', e);
     }
   }
 
@@ -167,10 +167,14 @@ async function handleDownload(
     }
   }
 
-  // 4. Return error if media could not be streamed
+  // 4. If direct stream failed, attempt direct browser download redirection if directUrl exists
+  if (directUrl && directUrl.startsWith('http')) {
+    return NextResponse.redirect(directUrl);
+  }
+
   return NextResponse.json(
-    { error: 'Media stream could not be extracted. If running on Vercel Serverless, deploy to Render using the included Dockerfile for full 100% media processing.' },
-    { status: 422 }
+    { error: 'Media is processing or restricted. Please deploy to Render using the included 1-Click button for 100% video/audio downloads.' },
+    { status: 500 }
   );
 }
 
