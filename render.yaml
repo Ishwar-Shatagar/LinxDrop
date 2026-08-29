@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: linkxdrop
+    env: docker
+    plan: free
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000

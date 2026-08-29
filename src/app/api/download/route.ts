@@ -50,7 +50,7 @@ async function handleDownload(
   const isAudioRequest = ['mp3', 'm4a', 'wav'].includes(ext.toLowerCase());
   const isImageRequest = ['jpg', 'jpeg', 'png', 'webp'].includes(ext.toLowerCase());
 
-  // 1. Direct Remote Stream Fetch (YouTube, TikTok, Instagram, Twitter CDNs)
+  // 1. Direct Remote Stream Fetch (e.g. TikWM direct video/audio, Instagram CDN, Twitter MP4)
   if (directUrl && directUrl.startsWith('http')) {
     try {
       const streamRes = await fetch(directUrl, {
@@ -62,7 +62,7 @@ async function handleDownload(
 
       if (streamRes.ok) {
         const mediaBuffer = await streamRes.arrayBuffer();
-        if (mediaBuffer.byteLength > 100) {
+        if (mediaBuffer.byteLength > 1024) {
           const outputExt = isImageRequest ? ext : (isAudioRequest ? 'm4a' : 'mp4');
           const safeFilename = `LinkxDrop_${cleanTitle}.${outputExt}`;
           const contentType = getContentType(outputExt);
@@ -83,44 +83,7 @@ async function handleDownload(
     }
   }
 
-  // 2. Pure Node.js YouTube download via ytdl-core (works directly on Vercel)
-  if (url && (url.includes('youtube.com') || url.includes('youtu.be'))) {
-    try {
-      const info = await ytdl.getInfo(url);
-      const filterType = isAudioRequest ? 'audioonly' : 'videoandaudio';
-      const formats = ytdl.filterFormats(info.formats, filterType);
-      const chosen = formats[0];
-
-      if (chosen && chosen.url) {
-        const fetchStream = await fetch(chosen.url, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
-          }
-        });
-
-        if (fetchStream.ok) {
-          const arrayBuf = await fetchStream.arrayBuffer();
-          const outputExt = isAudioRequest ? 'm4a' : 'mp4';
-          const safeFilename = `LinkxDrop_${cleanTitle}.${outputExt}`;
-          const contentType = getContentType(outputExt);
-
-          return new NextResponse(new Uint8Array(arrayBuf), {
-            status: 200,
-            headers: {
-              'Content-Type': contentType,
-              'Content-Disposition': `attachment; filename="${safeFilename}"`,
-              'Content-Length': arrayBuf.byteLength.toString(),
-              'Cache-Control': 'no-cache'
-            }
-          });
-        }
-      }
-    } catch (e) {
-      console.warn('ytdl-core direct download attempt error:', e);
-    }
-  }
-
-  // 3. If yt-dlp binary is available on server (Local / VPS / Render)
+  // 2. Local / Server-side yt-dlp binary extraction (Docker / Render / Railway / Local)
   if (url && url.startsWith('http')) {
     try {
       const tempDir = ensureTempDirExists();
@@ -134,7 +97,7 @@ async function handleDownload(
 
       const ytCommand = `python -m yt_dlp --no-warnings --no-playlist --extractor-args "youtube:player_client=android,web" -f "${formatSelector}" -o "${tempOutputPattern}" "${url.replace(/"/g, '\\"')}"`;
 
-      await execAsync(ytCommand, { timeout: 25000 });
+      await execAsync(ytCommand, { timeout: 35000 });
 
       const files = fs.readdirSync(tempDir);
       const downloadedFile = files.find(f => f.startsWith(uniqueId));
@@ -160,24 +123,55 @@ async function handleDownload(
           }
         });
       }
-    } catch {}
+    } catch (error: any) {
+      console.warn('Server yt-dlp execution error:', error.message);
+    }
   }
 
-  // 4. Fallback: stream valid response
-  const validPlayableBuffer = generateUniversalMediaStream(ext, cleanTitle);
-  const outputExt = isImageRequest ? ext : (isAudioRequest ? 'm4a' : 'mp4');
-  const safeFilename = `LinkxDrop_${cleanTitle}.${outputExt}`;
-  const contentType = getContentType(outputExt);
+  // 3. YouTube ytdl-core fallback
+  if (url && (url.includes('youtube.com') || url.includes('youtu.be'))) {
+    try {
+      const info = await ytdl.getInfo(url);
+      const filterType = isAudioRequest ? 'audioonly' : 'videoandaudio';
+      const formats = ytdl.filterFormats(info.formats, filterType);
+      const chosen = formats[0];
 
-  return new NextResponse(new Uint8Array(validPlayableBuffer), {
-    status: 200,
-    headers: {
-      'Content-Type': contentType,
-      'Content-Disposition': `attachment; filename="${safeFilename}"`,
-      'Content-Length': validPlayableBuffer.length.toString(),
-      'Cache-Control': 'no-cache'
+      if (chosen && chosen.url) {
+        const fetchStream = await fetch(chosen.url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
+          }
+        });
+
+        if (fetchStream.ok) {
+          const arrayBuf = await fetchStream.arrayBuffer();
+          if (arrayBuf.byteLength > 1024) {
+            const outputExt = isAudioRequest ? 'm4a' : 'mp4';
+            const safeFilename = `LinkxDrop_${cleanTitle}.${outputExt}`;
+            const contentType = getContentType(outputExt);
+
+            return new NextResponse(new Uint8Array(arrayBuf), {
+              status: 200,
+              headers: {
+                'Content-Type': contentType,
+                'Content-Disposition': `attachment; filename="${safeFilename}"`,
+                'Content-Length': arrayBuf.byteLength.toString(),
+                'Cache-Control': 'no-cache'
+              }
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('ytdl-core direct download attempt error:', e);
     }
-  });
+  }
+
+  // 4. Return error if media could not be streamed
+  return NextResponse.json(
+    { error: 'Media stream could not be extracted. If running on Vercel Serverless, deploy to Render using the included Dockerfile for full 100% media processing.' },
+    { status: 422 }
+  );
 }
 
 function getContentType(ext: string): string {
@@ -193,32 +187,4 @@ function getContentType(ext: string): string {
     case 'webp': return 'image/webp';
     default: return 'application/octet-stream';
   }
-}
-
-function generateUniversalMediaStream(ext: string, title: string): Buffer {
-  const extension = ext.toLowerCase();
-
-  if (['mp4', 'm4v', 'm4a'].includes(extension)) {
-    const ftypBox = Buffer.from([
-      0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70,
-      0x69, 0x73, 0x6F, 0x6D, 0x00, 0x00, 0x02, 0x00,
-      0x69, 0x73, 0x6F, 0x6D, 0x69, 0x73, 0x6F, 0x32,
-      0x61, 0x76, 0x63, 0x31, 0x6D, 0x70, 0x34, 0x31
-    ]);
-    const mdatHeader = Buffer.from([0x00, 0x01, 0x00, 0x00, 0x6D, 0x64, 0x61, 0x74]);
-    const padding = Buffer.alloc(1024 * 32, 0x00);
-    return Buffer.concat([ftypBox, mdatHeader, padding]);
-  }
-
-  if (extension === 'mp3') {
-    const id3Header = Buffer.from([
-      0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18,
-      0x54, 0x49, 0x54, 0x32, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
-      ...Buffer.from(title.substring(0, 9), 'utf-8')
-    ]);
-    const mpegFrames = Buffer.alloc(1024 * 32, 0xff);
-    return Buffer.concat([id3Header, mpegFrames]);
-  }
-
-  return Buffer.from(`LinkxDrop Media Attachment for ${title}`, 'utf-8');
 }
