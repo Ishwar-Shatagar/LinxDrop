@@ -51,52 +51,78 @@ export const ResultCard: React.FC<ResultCardProps> = ({
 
     setIsProcessing(true);
     setIsCompleted(false);
-    setProgress(15);
-    setDownloadSpeed('Calculating...');
+    setProgress(20);
+    setDownloadSpeed('Downloading...');
 
     if (onDownloadStart) onDownloadStart();
 
     const interval = setInterval(() => {
       setProgress((prev) => {
-        if (prev >= 90) {
+        if (prev >= 92) {
           clearInterval(interval);
-          return 90;
+          return 92;
         }
-        return prev + Math.floor(Math.random() * 15) + 12;
+        return prev + Math.floor(Math.random() * 15) + 10;
       });
-      setDownloadSpeed(`${(Math.random() * 4 + 2).toFixed(1)} MB/s`);
-    }, 250);
+      setDownloadSpeed(`${(Math.random() * 3 + 2).toFixed(1)} MB/s`);
+    }, 200);
 
     try {
+      const cleanTitle = metadata.title.replace(/[^a-zA-Z0-9_\-\s]/g, '').substring(0, 40) || 'Media';
+      const targetFilename = `LinkxDrop_${cleanTitle}_${selectedFormat.quality}.${selectedFormat.extension}`;
+
       const downloadUrl = `/api/download?url=${encodeURIComponent(metadata.url)}&formatId=${encodeURIComponent(selectedFormat.id)}&title=${encodeURIComponent(metadata.title)}&ext=${encodeURIComponent(selectedFormat.extension)}&directUrl=${encodeURIComponent(selectedFormat.directUrl || '')}`;
 
       const response = await fetch(downloadUrl);
-      if (!response.ok) {
-        throw new Error('Failed to download media.');
+
+      if (response.ok) {
+        const blob = await response.blob();
+        clearInterval(interval);
+        setProgress(100);
+
+        const blobUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = targetFilename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+
+        setIsProcessing(false);
+        setIsCompleted(true);
+
+        setTimeout(() => {
+          setIsCompleted(false);
+          setProgress(0);
+        }, 4000);
+        return;
       }
 
-      const blob = await response.blob();
-      clearInterval(interval);
-      setProgress(100);
+      // Fallback if API returned non-200: use direct browser anchor trigger
+      if (selectedFormat.directUrl) {
+        clearInterval(interval);
+        setProgress(100);
+        const link = document.createElement('a');
+        link.href = selectedFormat.directUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.download = targetFilename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
 
-      // Force mobile & desktop browser download
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      const cleanTitle = metadata.title.replace(/[^a-zA-Z0-9_\-\s]/g, '').substring(0, 40) || 'Media';
-      link.download = `LinkxDrop_${cleanTitle}_${selectedFormat.quality}.${selectedFormat.extension}`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
+        setIsProcessing(false);
+        setIsCompleted(true);
 
-      setIsProcessing(false);
-      setIsCompleted(true);
+        setTimeout(() => {
+          setIsCompleted(false);
+          setProgress(0);
+        }, 4000);
+        return;
+      }
 
-      setTimeout(() => {
-        setIsCompleted(false);
-        setProgress(0);
-      }, 4000);
+      throw new Error('Download could not be completed.');
 
     } catch (err: any) {
       clearInterval(interval);
@@ -236,7 +262,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({
                 className="flex items-center gap-2.5 p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 text-xs sm:text-sm font-medium"
               >
                 <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 shrink-0" />
-                <span>Downloaded successfully to your Downloads folder!</span>
+                <span>Downloaded successfully to your device!</span>
               </motion.div>
             )}
 
