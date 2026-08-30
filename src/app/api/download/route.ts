@@ -50,7 +50,7 @@ async function handleDownload(
   const isAudioRequest = ['mp3', 'm4a', 'wav'].includes(ext.toLowerCase());
   const isImageRequest = ['jpg', 'jpeg', 'png', 'webp'].includes(ext.toLowerCase());
 
-  // 1. Direct Remote Stream Fetch with appropriate referer & user-agent headers
+  // 1. Direct Remote Stream Fetch (TikWM, Twitter MP4, Instagram CDN, Image CDNs)
   if (directUrl && directUrl.startsWith('http')) {
     try {
       let referer = 'https://www.google.com/';
@@ -72,7 +72,7 @@ async function handleDownload(
 
       if (streamRes.ok) {
         const mediaBuffer = await streamRes.arrayBuffer();
-        if (mediaBuffer.byteLength > 200) {
+        if (mediaBuffer.byteLength > 1024) {
           const outputExt = isImageRequest ? ext : (isAudioRequest ? 'm4a' : 'mp4');
           const safeFilename = `LinkxDrop_${cleanTitle}.${outputExt}`;
           const contentType = getContentType(outputExt);
@@ -93,7 +93,7 @@ async function handleDownload(
     }
   }
 
-  // 2. Local / Server-side yt-dlp binary extraction (Docker / Render / Railway / Localhost)
+  // 2. Full Server-side yt-dlp binary extraction (Docker / Render / Railway / Localhost)
   if (url && url.startsWith('http')) {
     try {
       const tempDir = ensureTempDirExists();
@@ -173,26 +173,16 @@ async function handleDownload(
     } catch {}
   }
 
-  // 4. If directUrl exists and direct buffer failed, redirect directly to the CDN stream URL
+  // 4. If directUrl exists and server fetch failed, redirect client directly to CDN stream
   if (directUrl && directUrl.startsWith('http')) {
     return NextResponse.redirect(directUrl);
   }
 
-  // 5. Guaranteed fallback: Serve valid media response
-  const outputExt = isImageRequest ? ext : (isAudioRequest ? 'm4a' : 'mp4');
-  const safeFilename = `LinkxDrop_${cleanTitle}.${outputExt}`;
-  const contentType = getContentType(outputExt);
-  const fallbackBytes = Buffer.from(`LinkxDrop Media Stream: ${cleanTitle}`);
-
-  return new NextResponse(new Uint8Array(fallbackBytes), {
-    status: 200,
-    headers: {
-      'Content-Type': contentType,
-      'Content-Disposition': `attachment; filename="${safeFilename}"`,
-      'Content-Length': fallbackBytes.length.toString(),
-      'Cache-Control': 'no-cache'
-    }
-  });
+  // 5. Explicit error response for serverless restrictions
+  return NextResponse.json(
+    { error: 'YouTube/Social media extraction on Vercel Serverless is restricted by datacenter firewalls. Deploy to Render (Free) using the 1-Click button or run locally for 100% video/audio downloads.' },
+    { status: 422 }
+  );
 }
 
 function getContentType(ext: string): string {

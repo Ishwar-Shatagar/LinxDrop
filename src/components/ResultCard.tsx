@@ -4,6 +4,7 @@ import { PLATFORM_CONFIGS } from '@/config/platforms';
 import { MediaFormat, MediaMetadata } from '@/lib/types';
 import { motion } from 'framer-motion';
 import {
+  AlertCircle,
   CheckCircle2,
   Clock,
   Download,
@@ -34,6 +35,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({
   const [progress, setProgress] = useState(0);
   const [downloadSpeed, setDownloadSpeed] = useState<string | null>(null);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [imgSrc, setImgSrc] = useState(metadata.thumbnail);
 
   useEffect(() => {
@@ -43,6 +45,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({
     setImgSrc(metadata.thumbnail);
     setIsCompleted(false);
     setIsProcessing(false);
+    setErrorMessage(null);
     setProgress(0);
   }, [metadata]);
 
@@ -51,6 +54,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({
 
     setIsProcessing(true);
     setIsCompleted(false);
+    setErrorMessage(null);
     setProgress(20);
     setDownloadSpeed('Downloading...');
 
@@ -99,7 +103,10 @@ export const ResultCard: React.FC<ResultCardProps> = ({
         return;
       }
 
-      // Fallback if API returned non-200: use direct browser anchor trigger
+      // If response failed, parse server message
+      const errData = await response.json().catch(() => ({}));
+      const serverErr = errData.error || 'Serverless extraction restricted for this video on Vercel.';
+
       if (selectedFormat.directUrl) {
         clearInterval(interval);
         setProgress(100);
@@ -114,23 +121,19 @@ export const ResultCard: React.FC<ResultCardProps> = ({
 
         setIsProcessing(false);
         setIsCompleted(true);
-
-        setTimeout(() => {
-          setIsCompleted(false);
-          setProgress(0);
-        }, 4000);
         return;
       }
 
-      throw new Error('Download could not be completed.');
+      throw new Error(serverErr);
 
     } catch (err: any) {
       clearInterval(interval);
       setIsProcessing(false);
       setProgress(0);
       setDownloadSpeed(null);
+      setErrorMessage(err.message || 'Download failed.');
       if (onDownloadError) {
-        onDownloadError(err.message || 'Download failed. Please try again.');
+        onDownloadError(err.message || 'Download failed.');
       }
     }
   };
@@ -221,6 +224,31 @@ export const ResultCard: React.FC<ResultCardProps> = ({
                 onSelectFormat={setSelectedFormat}
               />
             </div>
+
+            {/* Error / Hosting advice notice if serverless conversion restricted */}
+            {errorMessage && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/30 text-amber-200 text-xs leading-relaxed space-y-1.5"
+              >
+                <div className="flex items-center gap-2 font-semibold text-amber-300">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>Serverless Restriction on Vercel</span>
+                </div>
+                <p>{errorMessage}</p>
+                <div className="pt-1 flex gap-2">
+                  <a
+                    href="https://render.com/deploy?repo=https://github.com/Ishwar-Shatagar/LinxDrop"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-semibold text-[11px] transition-colors"
+                  >
+                    Deploy to Render for 100% Media Support
+                  </a>
+                </div>
+              </motion.div>
+            )}
 
             {/* Progress indicator during processing */}
             {isProcessing && (
